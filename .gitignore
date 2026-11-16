@@ -14,3 +14,7 @@ log/
 *.synctex.gz
 .DS_Store
 Thumbs.db
+*.7z
+*.tar.gz
+*.npy
+
