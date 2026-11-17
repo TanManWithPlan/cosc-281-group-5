@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'robot/src/a2r_robot'))
+sys.path.insert(0, str(ROOT / 'robot/src/team_navigation'))
 from a2r_robot.guard import Deadman, MotionGuard, Pad, SpeedSelector, SPEEDS, validate_command, TREAD_LIMIT
 
 
@@ -318,7 +319,7 @@ def navigation(monkeypatch):
         def create_timer(self, period, callback):
             assert period == .05
         def get_clock(self):
-            return types.SimpleNamespace(now=lambda: types.SimpleNamespace(to_msg=lambda: 'stamp'))
+            return types.SimpleNamespace(now=lambda: types.SimpleNamespace(nanoseconds=1_000_000_000, to_msg=lambda: 'stamp'))
         def get_logger(self):
             return types.SimpleNamespace(error=lambda text: None)
 
@@ -344,11 +345,11 @@ def navigation(monkeypatch):
 
 
 def test_starter_receives_sensors_and_publishes_zero(navigation):
-    msg = types.SimpleNamespace(data=[[[1, 2, 3]]], header=types.SimpleNamespace(stamp='image-stamp'))
+    msg = types.SimpleNamespace(data=__import__('numpy').zeros((240, 320, 3), dtype='uint8'), header=types.SimpleNamespace(stamp=types.SimpleNamespace(sec=1, nanosec=0)))
     navigation.subscriptions['camera/image_raw'](msg)
     navigation.subscriptions['imu/data'](msg)
-    assert navigation.image == msg.data
-    assert navigation.image_stamp == 'image-stamp'
+    assert navigation.image is msg.data
+    assert navigation.image_stamp == msg.header.stamp
     assert navigation.imu is msg
     for _ in range(20):
         navigation.tick()
@@ -376,3 +377,21 @@ def test_hardware_checks_mode_and_post_selection_stamp():
     assert 'selected_mode=self.local_deadman.mode' in text
     assert 'mode_entered=self.local_deadman.entered_ros' in text
     assert "pubs[0].node_name=='rvr_safety'" in text
+
+
+def test_navigation_pipeline_steers_and_stops_on_missing_or_future_image(navigation):
+    import numpy as np
+    def deliver(frame, sec=1, nanosec=0):
+        msg = types.SimpleNamespace(data=frame, header=types.SimpleNamespace(
+            stamp=types.SimpleNamespace(sec=sec, nanosec=nanosec)))
+        navigation.image_cb(msg)
+        navigation.tick()
+        return navigation.messages[-1]
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    frame[160:, 240:252] = (0, 255, 255)
+    command = deliver(frame)
+    assert command.forward_speed_m_s > 0 and command.yaw_rate_rad_s < 0
+    command = deliver(np.zeros_like(frame), nanosec=1)
+    assert command.forward_speed_m_s == command.yaw_rate_rad_s == 0
+    command = deliver(frame, sec=10)
+    assert command.forward_speed_m_s == command.yaw_rate_rad_s == 0

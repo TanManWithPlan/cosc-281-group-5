@@ -1,4 +1,11 @@
 /**:
   ros__parameters:
-    # A suggested development setting, not permission to move the car.
     requested_forward_speed_m_s: 0.05
+    steering_kp: 0.8
+    max_yaw_rate_rad_s: 0.6
+    turn_slowdown: 0.8
+    max_image_age_s: 0.25
+    yellow_lo: [20, 80, 80]
+    yellow_hi: [35, 255, 255]
+    blue_lo: [95, 80, 50]
+    blue_hi: [130, 255, 255]

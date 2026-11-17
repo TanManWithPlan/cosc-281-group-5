@@ -105,3 +105,8 @@ Domain 92 keeps the synthetic inputs away from the live robot. `starter_smoke.py
 ## Your changes
 
 Keep your project changes in this repository, which is released under the [MIT license](../LICENSE), and retain the [course attribution](NOTICE.md). Keep the lab passwords and your personal credentials out of commits; the lab connection details are in [setup](../docs/SETUP.md#connect). Do not commit `build/`, `install/`, `log/`, videos or recordings.
+
+## Control branch
+
+See [road-following control](../docs/CONTROL.md) for the integrated controller,
+parameter meanings, test commands, and robot validation procedure.
