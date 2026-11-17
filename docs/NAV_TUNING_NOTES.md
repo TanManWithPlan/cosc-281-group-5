@@ -46,15 +46,44 @@ and existing perception tests behave as before.
 
 ## How to run
 
-On the Jetson, from a built checkout of this branch (robot 5 used `~/a2r-nav-alejo`):
+On the Jetson (SSH), once per checkout: build with the course Python environment.
 
 ```bash
-bash tools/start-tuned.sh 0.30     # or 0.45, 0.80 ...
+cd ~/a2r-student && git fetch && git checkout alejo/nav-route-merge
+source /opt/ros/jazzy/setup.bash && source ~/ros-venv/bin/activate
+cd robot && python -m colcon build --symlink-install     # expect: 4 packages finished
 ```
 
-Press **Y** while stopped and neutral for Medium (> 0.15 m/s) or High (> 0.60 m/s). Hold **RB**.
+Then, from the repository root, one command starts the base (motors enabled, track width from
+`~/robot-setup-measurements/geometry.json`) and navigation, with speed-matched settings:
+
+```bash
+bash tools/start-tuned.sh 0.30                              # normal: camera following only
+bash tools/start-tuned.sh 0.30 record ~/routes/lap1.json    # same driving, also saves the route
+bash tools/start-tuned.sh 0.30 replay ~/routes/lap1.json    # driving + route advice (slows before
+                                                            # recorded curves / road-lost spots)
+```
+
+1. RVR powered on; F710 on **X**, MODE light off; sticks centered.
+2. Press **Y** while stopped and neutral: Medium for > 0.15 m/s, High for > 0.60 m/s.
+3. Put the robot on the tape. For record/replay, use the **same taped start mark facing the same
+   way** and start the script with the robot already there: position is counted from where the
+   node starts, and carrying/rotating the robot afterwards confuses replay.
+4. Hold **RB** to drive; release (or press A) to stop. Ctrl+C in the script stops everything; in
+   record mode it also does the final route save. Record one lap per file.
+
+Live changes (another SSH terminal, after sourcing ROS + this workspace + `/etc/a2r-robot/robot.sh`):
+
+```bash
+ros2 param set /$ROBOT_NAMESPACE/navigation requested_forward_speed_m_s 0.45
+ros2 param set /$ROBOT_NAMESPACE/navigation route_advice_weight 0.5     # replay: 0 = log only
+ros2 param set /$ROBOT_NAMESPACE/navigation lookahead_band_top 0.55     # turn later
+```
+
 Only one node may publish `navigation/request`; check with
-`ros2 topic info /jetson5/navigation/request` (Publisher count: 1).
+`ros2 topic info /$ROBOT_NAMESPACE/navigation/request` (Publisher count: 1). The script refuses to
+start if a base or navigation node is already running. Logs: `~/nav_runs/run_*/nav_log.csv`
+(includes `route_factor` and `route_s`).
 
 ## Results so far
 
@@ -64,7 +93,8 @@ Only one node may publish `navigation/request`; check with
 | 0.30 (fixed gain 2.4) | Medium | tracked curves |
 | 0.45 (fixed gain 3.6) | Medium | tracked curves, slight overturn |
 | 0.30, tuned branch | Medium | **no overturn**, turns at the right time |
-| 0.80, near band | High | reacted too late -> speed-dependent band added (not yet floor-tested) |
+| 0.80, near band | High | reacted too late -> speed-dependent band added |
+| 0.30 record + replay (merged) | Medium | drove several laps fine; 179-point route, returned within 4 cm of start |
 
 ## Hardware notes
 
