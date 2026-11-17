@@ -1,0 +1,35 @@
+================================================================================================ test session starts ================================================================================================
+platform linux -- Python 3.12.3, pytest-7.4.4, pluggy-1.4.0
+rootdir: /home/a2r-lab-jetson/a2r-student
+plugins: ament-lint-0.17.5, ament-copyright-0.17.5, ament-xmllint-0.17.5, launch-testing-ros-0.26.13, ament-flake8-0.17.5, ament-pep257-0.17.5, launch-testing-3.4.12, colcon-core-0.21.3, cov-4.1.0
+collected 36 items
+
+tests/test_navigation.py .Observation(result=PerceptionResult(found=True, error=-0.4979547228727556, cx=80.3272443403591, yellow_pixels=12810, blue_left=0.0, blue_right=0.941844512195122, blue_warning=True, roi_top=158), stamp_s=1794886301.2416155)
+.Observation(result=PerceptionResult(found=True, error=-0.0022565118912798, cx=159.63895809739523, yellow_pixels=22075, blue_left=0.14367378048780488, blue_right=0.1419969512195122, blue_warning=True, roi_top=158), stamp_s=1794886301.2615519)
+.Observation(result=PerceptionResult(found=True, error=-0.002635583650085316, cx=159.57830661598635, yellow_pixels=18153, blue_left=0.22103658536585366, blue_right=0.22111280487804877, blue_warning=True, roi_top=158), stamp_s=1794886301.2775602)
+.Observation(result=PerceptionResult(found=True, error=-0.0024505337986962415, cx=159.6079145922086, yellow_pixels=19483, blue_left=0.17103658536585367, blue_right=0.16996951219512196, blue_warning=True, roi_top=158), stamp_s=1794886301.2924988)
+.Observation(result=PerceptionResult(found=True, error=0.014826073572418075, cx=162.3721717715869, yellow_pixels=19491, blue_left=0.18833841463414633, blue_right=0.15251524390243903, blue_warning=True, roi_top=158), stamp_s=1794886301.30784)
+.Observation(result=PerceptionResult(found=True, error=-0.021076073572418075, cx=156.6278282284131, yellow_pixels=19491, blue_left=0.1535060975609756, blue_right=0.18833841463414633, blue_warning=True, roi_top=158), stamp_s=1794886301.322614)
+.Observation(result=PerceptionResult(found=True, error=-0.0024505337986962415, cx=159.6079145922086, yellow_pixels=19483, blue_left=0.17103658536585367, blue_right=0.16996951219512196, blue_warning=True, roi_top=158), stamp_s=1794886301.3382287)
+.RoadEstimate(offset=-0.4979547228727556, valid=True, status='first', raw=-0.4979547228727556, image_age_s=0.0028274059295654297, road_age_s=0.0028274059295654297)
+.RoadEstimate(offset=-0.0022565118912798, valid=True, status='first', raw=-0.0022565118912798, image_age_s=0.00311279296875, road_age_s=0.00311279296875)
+.RoadEstimate(offset=-0.002635583650085316, valid=True, status='first', raw=-0.002635583650085316, image_age_s=0.0027527809143066406, road_age_s=0.0027527809143066406)
+.RoadEstimate(offset=-0.0024505337986962415, valid=True, status='first', raw=-0.0024505337986962415, image_age_s=0.003247976303100586, road_age_s=0.003247976303100586)
+.RoadEstimate(offset=0.014826073572418075, valid=True, status='first', raw=0.014826073572418075, image_age_s=0.0028810501098632812, road_age_s=0.0028810501098632812)
+.RoadEstimate(offset=-0.021076073572418075, valid=True, status='first', raw=-0.021076073572418075, image_age_s=0.0030176639556884766, road_age_s=0.0030176639556884766)
+.RoadEstimate(offset=-0.0024505337986962415, valid=True, status='first', raw=-0.0024505337986962415, image_age_s=0.0029540061950683594, road_age_s=0.0029540061950683594)
+.Action(mode='follow', reason='first', offset=-0.4979547228727556, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=-0.0022565118912798, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=-0.002635583650085316, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=-0.0024505337986962415, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=0.014826073572418075, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=-0.021076073572418075, speed_scale=1.0)
+.Action(mode='follow', reason='first', offset=-0.0024505337986962415, speed_scale=1.0)
+........(0.05, 0.3983637782982045)
+.(0.05, 0.00180520951302384)
+.(0.05, 0.0021084669200682527)
+.(0.05, 0.0019604270389569933)
+.(0.05, -0.011860858857934461)
+.(0.05, 0.016860858857934462)
+.(0.05, 0.0019604270389569933)
+.

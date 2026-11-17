@@ -32,6 +32,29 @@ MIN_YELLOW_PIXELS = 200             # fewer than this => track "not found"
 BLUE_WARN_FRACTION = 0.05           # blue covering >5% of an ROI half => warning
 
 
+def centerline_target(y_roi):
+    """Equal-weight row centres in a fixed look-ahead band, not an area centroid.
+
+    A wide sheet corner must not outweigh the narrower road ahead. Require
+    yellow in at least half the band so a last sliver of paper is not a path.
+    Percentile edges tolerate small speckles and gaps from glossy reflections.
+    Returns (x, y within ROI), or None when there is insufficient road ahead.
+    """
+    height = y_roi.shape[0]
+    top, bottom = int(height * .25), int(height * .55)
+    if bottom <= top:
+        return None
+    centres = []
+    for row in y_roi[top:bottom]:
+        xs = np.flatnonzero(row)
+        if xs.size >= 6:
+            left, right = np.percentile(xs, (5, 95))
+            centres.append((left + right) / 2)
+    if len(centres) < max(6, (bottom - top + 1) // 2):
+        return None
+    return float(np.median(centres)), (top + bottom - 1) // 2
+
+
 def validate_triplet(value):
     """Return value as a list of three in-range HSV ints, or raise ValueError."""
     vals = [int(v) for v in value]
@@ -66,7 +89,7 @@ def save_config(cfg, path):
 class PerceptionResult:
     found: bool             # was enough yellow seen in the ROI?
     error: float            # -1 (left) .. +1 (right); last known value if not found
-    cx: float | None        # centroid x in processed-image pixels (None if not found)
+    cx: float | None        # centreline target x in processed-image pixels
     yellow_pixels: int
     blue_left: float        # fraction of left half of ROI that is blue
     blue_right: float       # fraction of right half of ROI that is blue
@@ -76,6 +99,7 @@ class PerceptionResult:
     yellow_mask: np.ndarray = field(repr=False, default=None)
     blue_mask: np.ndarray = field(repr=False, default=None)
     roi_top: int = 0
+    target_y: int | None = None
 
 
 class Perception:
@@ -108,14 +132,14 @@ class Perception:
         b_roi = blue_mask[roi_top:, :]
 
         yellow_pixels = int(np.count_nonzero(y_roi))
-        m = cv2.moments(y_roi, binaryImage=True)
-        if yellow_pixels >= MIN_YELLOW_PIXELS and m['m00'] > 0:
-            cx = m['m10'] / m['m00']
+        target = centerline_target(y_roi)
+        if yellow_pixels >= MIN_YELLOW_PIXELS and target is not None:
+            cx, target_y = target
             error = float(np.clip((cx - w / 2) / (w / 2), -1.0, 1.0))
             found = True
             self.last_error = error
         else:
-            cx, found = None, False
+            cx, target_y, found = None, None, False
             error = self.last_error  # remember which side the track was last seen on
 
         half = w // 2
@@ -134,6 +158,7 @@ class Perception:
             yellow_mask=yellow_mask,
             blue_mask=blue_mask,
             roi_top=roi_top,
+            target_y=roi_top + target_y if target_y is not None else None,
         )
 
 
@@ -154,7 +179,7 @@ def draw_overlay(r, left_cmd, right_cmd, fps):
     cv2.rectangle(img, (0, r.roi_top), (w - 1, h - 1), (0, 255, 0), 1)
     cv2.line(img, (w // 2, r.roi_top), (w // 2, h), (255, 255, 255), 1)
     if r.found:
-        cy = (r.roi_top + h) // 2
+        cy = r.target_y if r.target_y is not None else (r.roi_top + h) // 2
         cv2.circle(img, (int(r.cx), cy), 6, (0, 0, 255), -1)
         cv2.line(img, (w // 2, cy), (int(r.cx), cy), (0, 0, 255), 2)
 

@@ -188,6 +188,8 @@ class Navigation(Node):
     # ------------------------------------------------------------ hook 3: planning (basic)
     def choose_action(self, estimate):
         """Follow while the estimate is valid; otherwise stop. Slow down near blue."""
+        if self.last_observation is None or not self.last_observation.result.found:
+            return Action('stop', 'no_road_ahead')
         if estimate is None or not estimate.valid:
             status = estimate.status if estimate is not None else 'no_estimate'
             return Action('stop', status)
