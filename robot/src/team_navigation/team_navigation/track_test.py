@@ -343,19 +343,19 @@ def start_web_server(node, port):
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             with node.frame_cond:
-                node.web_clients += 1
-            seq = -1
+                node.web_clients += 1  # tells image_cb to start drawing the preview
+                seq = node.frame_seq
             try:
                 while rclpy.ok():
                     with node.frame_cond:
                         node.frame_cond.wait_for(lambda: node.frame_seq != seq, timeout=1.0)
-                        if node.frame_seq == seq:
+                        if node.frame_seq == seq or node.latest_debug_jpeg is None:
                             continue
                         jpeg, seq = node.latest_debug_jpeg, node.frame_seq
                     self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\n'
                                      + f'Content-Length: {len(jpeg)}\r\n\r\n'.encode()
                                      + jpeg + b'\r\n')
-            except (BrokenPipeError, ConnectionResetError):
+            except OSError:  # browser closed the tab or the connection dropped
                 pass
             finally:
                 with node.frame_cond:
