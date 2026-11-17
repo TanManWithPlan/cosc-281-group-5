@@ -50,7 +50,7 @@ def navigation(monkeypatch):
                      'QoSProfile': lambda **kw: kw,
                      'ReliabilityPolicy': types.SimpleNamespace(BEST_EFFORT='best_effort')},
         'rclpy.executors': {'ExternalShutdownException': type('Shutdown', (Exception,), {})},
-        'sensor_msgs.msg': {'Image': Message, 'Imu': Message},
+        'sensor_msgs.msg': {'Image': Message, 'Imu': Message, 'CompressedImage': Message},
         'cv_bridge': {'CvBridge': lambda: types.SimpleNamespace(imgmsg_to_cv2=lambda msg, **kw: msg.data)},
         'course_robot_interfaces.msg': {'MotionRequest': Message},
     }

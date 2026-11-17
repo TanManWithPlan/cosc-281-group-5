@@ -299,14 +299,20 @@ def test_independent_hardware_gate(change):
 
 
 def test_starter_receives_sensors_and_publishes_zero(navigation):
-    msg = types.SimpleNamespace(data=[[[1, 2, 3]]], header=types.SimpleNamespace(stamp='image-stamp'))
-    navigation.subscriptions['camera/image_raw'](msg)
+    # Navigation reads the JPEG topic by default (use_compressed_image) and
+    # decodes the newest frame once per tick. A blank frame has no road.
+    import cv2
+    import numpy as np
+    ok, jpeg = cv2.imencode('.jpg', np.zeros((4, 4, 3), np.uint8))
+    assert ok
+    msg = types.SimpleNamespace(data=jpeg.tobytes(), header=types.SimpleNamespace(stamp='image-stamp'))
+    navigation.subscriptions['camera/image_raw/compressed'](msg)
     navigation.subscriptions['imu/data'](msg)
-    assert navigation.image == msg.data
-    assert navigation.image_stamp == 'image-stamp'
     assert navigation.imu is msg
     for _ in range(20):
         navigation.tick()
+    assert navigation.image is not None and navigation.image.shape == (4, 4, 3)
+    assert navigation.image_stamp == 'image-stamp'
     assert len(navigation.messages) == 20
     assert all(m.forward_speed_m_s == m.yaw_rate_rad_s == 0 and m.header.stamp == 'stamp'
                for m in navigation.messages)

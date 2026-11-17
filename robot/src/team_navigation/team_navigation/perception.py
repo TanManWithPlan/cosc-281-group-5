@@ -32,16 +32,28 @@ MIN_YELLOW_PIXELS = 200             # fewer than this => track "not found"
 BLUE_WARN_FRACTION = 0.05           # blue covering >5% of an ROI half => warning
 
 
-def centerline_target(y_roi):
+LOOKAHEAD_BAND_TOP = 0.25          # band of ROI rows used for the target (0 = far edge of ROI,
+LOOKAHEAD_BAND_BOTTOM = 0.55       # 1 = nearest row). Lower band = target closer to the robot.
+LOOKAHEAD_MIN_COVERAGE = 0.5       # fraction of band rows that must contain yellow
+
+
+def centerline_target(y_roi, band_top=LOOKAHEAD_BAND_TOP, band_bottom=LOOKAHEAD_BAND_BOTTOM,
+                      min_coverage=LOOKAHEAD_MIN_COVERAGE):
     """Equal-weight row centres in a fixed look-ahead band, not an area centroid.
 
     A wide sheet corner must not outweigh the narrower road ahead. Require
-    yellow in at least half the band so a last sliver of paper is not a path.
-    Percentile edges tolerate small speckles and gaps from glossy reflections.
-    Returns (x, y within ROI), or None when there is insufficient road ahead.
+    yellow in at least min_coverage of the band so a last sliver of paper is
+    not a path. Percentile edges tolerate small speckles and gaps from glossy
+    reflections. Returns (x, y within ROI), or None when there is insufficient
+    road ahead.
+
+    band_top/band_bottom are fractions of the ROI height (0 = top/far,
+    1 = bottom/near). Moving the band down aims at road closer to the robot,
+    so it starts turning later; a lower min_coverage keeps following a road
+    end longer before declaring it gone.
     """
     height = y_roi.shape[0]
-    top, bottom = int(height * .25), int(height * .55)
+    top, bottom = int(height * band_top), int(height * band_bottom)
     if bottom <= top:
         return None
     centres = []
@@ -50,7 +62,7 @@ def centerline_target(y_roi):
         if xs.size >= 6:
             left, right = np.percentile(xs, (5, 95))
             centres.append((left + right) / 2)
-    if len(centres) < max(6, (bottom - top + 1) // 2):
+    if len(centres) < max(6, int((bottom - top + 1) * min_coverage)):
         return None
     return float(np.median(centres)), (top + bottom - 1) // 2
 
@@ -106,6 +118,10 @@ class Perception:
     def __init__(self, config=None):
         self.set_config(config or DEFAULT_CONFIG)
         self.last_error = 0.0
+        # Look-ahead band; navigation may change these live from ROS parameters.
+        self.band_top = LOOKAHEAD_BAND_TOP
+        self.band_bottom = LOOKAHEAD_BAND_BOTTOM
+        self.min_coverage = LOOKAHEAD_MIN_COVERAGE
 
     def set_config(self, cfg):
         self.cfg = {k: list(cfg[k]) for k in CONFIG_KEYS}
@@ -132,7 +148,7 @@ class Perception:
         b_roi = blue_mask[roi_top:, :]
 
         yellow_pixels = int(np.count_nonzero(y_roi))
-        target = centerline_target(y_roi)
+        target = centerline_target(y_roi, self.band_top, self.band_bottom, self.min_coverage)
         if yellow_pixels >= MIN_YELLOW_PIXELS and target is not None:
             cx, target_y = target
             error = float(np.clip((cx - w / 2) / (w / 2), -1.0, 1.0))

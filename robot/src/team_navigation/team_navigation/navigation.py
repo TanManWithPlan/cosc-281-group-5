@@ -31,7 +31,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, QoSProfile, ReliabilityPolicy
 from rclpy.executors import ExternalShutdownException
-from sensor_msgs.msg import Image, Imu
+from sensor_msgs.msg import Image, Imu, CompressedImage
 from cv_bridge import CvBridge
 from course_robot_interfaces.msg import MotionRequest
 
@@ -44,10 +44,23 @@ from team_navigation.estimation import RoadEstimator
 # live (they're re-read every tick). Floats must keep a decimal point.
 PARAMETER_DEFAULTS = {
     # --- control ---
-    'requested_forward_speed_m_s': 0.05,   # starter's name, kept
-    'steering_gain_rad_s': 0.8,            # rad/s of turn per unit of offset (offset is -1..+1)
-    'max_yaw_rate_rad_s': 0.8,
+    'requested_forward_speed_m_s': 0.30,   # starter's name, kept. Above 0.15 needs Medium (press Y).
+    # Speed-scaled steering: yaw = -gain_per_m * forward_speed * offset, so the same
+    # gain follows the same curves at any speed (robot-5 tests: 0.8 rad/s at 0.10 m/s,
+    # 2.4 at 0.30 and 3.6 at 0.45 all tracked curves -> ~8 per metre).
+    # Set to 0.0 to fall back to the fixed steering_gain_rad_s below.
+    'steering_gain_per_m': 8.0,
+    'steering_gain_rad_s': 0.8,            # legacy fixed gain: rad/s per unit offset (offset -1..+1)
+    'max_yaw_rate_rad_s': 2.4,
+    # --- perception look-ahead (fractions of the bottom-third ROI; 0 = far edge, 1 = nearest row) ---
+    # Lower band = aim at road closer to the robot = turn later / cut corners less.
+    'lookahead_band_top': 0.45,            # perception.py default 0.25
+    'lookahead_band_bottom': 0.85,         # perception.py default 0.55
+    'lookahead_min_coverage': 0.3,         # perception.py default 0.5; lower = keep following a road end longer
+    'use_compressed_image': True,          # JPEG topic arrives far fresher than raw over DDS (read at startup)
     # --- planning ---
+    'follow_while_holding': True,          # keep following the estimator's held offset while the road
+    'holding_speed_scale': 0.6,            # is briefly missing (< road_lost_timeout_s), at this speed fraction
     'blue_slowdown_factor': 1.0,   # multiply speed by this while blue boundary is close (1.0 = off)
     'branch_choice': 'all',        # 'all' = center of all yellow (perception default);
                                    # 'left' / 'right' / 'largest' = follow only that yellow blob (for forks)
@@ -92,6 +105,7 @@ class Navigation(Node):
 
         self.bridge = CvBridge()
         self.image = self.image_stamp = self.imu = None
+        self.jpeg = None              # latest compressed frame, decoded lazily in tick()
         self.previous_error = None
         self.last_observation = None
 
@@ -108,7 +122,14 @@ class Navigation(Node):
         self.csv_file = self.csv_writer = None
         self.open_log()
 
-        self.create_subscription(Image, 'camera/image_raw', self.image_cb, qos_profile_sensor_data)
+        if self.cfg['use_compressed_image']:
+            # Only JPEG crosses DDS; raw frames often arrived >0.25 s old (stale-image stops).
+            self.create_subscription(CompressedImage, 'camera/image_raw/compressed',
+                                     self.compressed_cb, qos_profile_sensor_data)
+        else:
+            self.create_subscription(Image, 'camera/image_raw', self.image_cb, qos_profile_sensor_data)
+        self.get_logger().info('Camera topic: ' + ('camera/image_raw/compressed'
+                               if self.cfg['use_compressed_image'] else 'camera/image_raw'))
         self.create_subscription(Imu, 'imu/data', self.imu_cb, qos_profile_sensor_data)
         self.publisher = self.create_publisher(
             MotionRequest, 'navigation/request',
@@ -124,6 +145,21 @@ class Navigation(Node):
             self.image = self.image_stamp = None
             self.get_logger().error(f'Image conversion failed: {exc}')
 
+    def compressed_cb(self, msg):
+        # Keep only the newest JPEG; decoding happens once per control tick.
+        self.jpeg = msg
+
+    def decode_latest(self):
+        """Decode the newest compressed frame (if any) into self.image / self.image_stamp."""
+        msg, self.jpeg = self.jpeg, None
+        if msg is None:
+            return
+        frame = cv2.imdecode(np.frombuffer(bytes(msg.data), np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            self.get_logger().error('JPEG decode failed; keeping previous frame')
+            return
+        self.image, self.image_stamp = frame, msg.header.stamp
+
     def imu_cb(self, msg):
         self.imu = msg
 
@@ -135,6 +171,15 @@ class Navigation(Node):
         for name in ('smoothing_alpha', 'max_image_age_s', 'road_lost_timeout_s',
                      'max_jump', 'outlier_accept_count'):
             setattr(self.estimator, name, self.cfg[name])
+
+    def apply_perception_params(self):
+        top, bottom = self.cfg['lookahead_band_top'], self.cfg['lookahead_band_bottom']
+        coverage = self.cfg['lookahead_min_coverage']
+        if not (0.0 <= top < bottom <= 1.0 and 0.0 < coverage <= 1.0):
+            raise ValueError(f'invalid look-ahead band top={top} bottom={bottom} coverage={coverage}')
+        self.perception.band_top = top
+        self.perception.band_bottom = bottom
+        self.perception.min_coverage = coverage
 
     def now_s(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -187,15 +232,23 @@ class Navigation(Node):
 
     # ------------------------------------------------------------ hook 3: planning (basic)
     def choose_action(self, estimate):
-        """Follow while the estimate is valid; otherwise stop. Slow down near blue."""
-        if self.last_observation is None or not self.last_observation.result.found:
-            return Action('stop', 'no_road_ahead')
+        """Follow while the estimate is valid; otherwise stop. Slow down near blue.
+
+        When the road is briefly missing (estimator status 'holding', still
+        valid until road_lost_timeout_s), keep following the held offset at
+        holding_speed_scale instead of stopping on the first empty frame.
+        """
         if estimate is None or not estimate.valid:
             status = estimate.status if estimate is not None else 'no_estimate'
             return Action('stop', status)
+        seen = self.last_observation is not None and self.last_observation.result.found
         scale = 1.0
+        if not seen:
+            if not (self.cfg['follow_while_holding'] and estimate.status == 'holding'):
+                return Action('stop', 'no_road_ahead')
+            scale = self.cfg['holding_speed_scale']
         if self.last_observation is not None and self.last_observation.result.blue_warning:
-            scale = self.cfg['blue_slowdown_factor']
+            scale *= self.cfg['blue_slowdown_factor']
         return Action('follow', estimate.status, estimate.offset, scale)
 
     # ------------------------------------------------------------ hook 4: control (basic)
@@ -209,13 +262,21 @@ class Navigation(Node):
         it scales both together, preserving their ratio without disarming.
         Invalid or stale requests still stop and disarm. See the README.
 
-        Basic proportional control: constant forward speed, turn rate
-        proportional to the offset. Offset +0.5 with gain 0.8 -> yaw -0.40 (right).
+        Proportional control on the road offset. With steering_gain_per_m > 0
+        the turn rate scales with forward speed (a curvature command), so one
+        gain tracks the same curves at any speed:
+            yaw = -steering_gain_per_m * forward * offset
+        e.g. gain 8, 0.30 m/s, offset +0.5 -> yaw -1.2 rad/s (right).
+        With steering_gain_per_m == 0 it falls back to the fixed gain:
+            yaw = -steering_gain_rad_s * offset
         """
         if action is None or action.mode != 'follow':
             return 0., 0.
         forward = self.cfg['requested_forward_speed_m_s'] * action.speed_scale
-        yaw = -self.cfg['steering_gain_rad_s'] * action.offset
+        if self.cfg['steering_gain_per_m'] > 0:
+            yaw = -self.cfg['steering_gain_per_m'] * forward * action.offset
+        else:
+            yaw = -self.cfg['steering_gain_rad_s'] * action.offset
         limit = self.cfg['max_yaw_rate_rad_s']
         return forward, max(-limit, min(limit, yaw))
 
@@ -228,6 +289,8 @@ class Navigation(Node):
         try:
             self.read_parameters()
             self.apply_estimator_params()
+            self.apply_perception_params()
+            self.decode_latest()
             observation = self.process_image(self.image)
             self.last_observation = observation
             estimate = self.update_estimate(observation, self.imu)

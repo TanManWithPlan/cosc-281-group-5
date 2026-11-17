@@ -1,4 +1,22 @@
 /**:
   ros__parameters:
     # A suggested development setting, not permission to move the car.
-    requested_forward_speed_m_s: 0.05
+    # 0.30 m/s needs the Medium profile (press Y once, stopped, nothing held);
+    # in Low the safety node scales treads down to 0.15 m/s.
+    requested_forward_speed_m_s: 0.30
+
+    # Speed-scaled steering (yaw = -gain * speed * offset). Robot-5 curve tests
+    # tracked well at ~8 per metre for 0.10-0.45 m/s. 0.0 = use steering_gain_rad_s.
+    steering_gain_per_m: 8.0
+    max_yaw_rate_rad_s: 2.4
+
+    # Look-ahead band within the bottom-third ROI (0 = far edge, 1 = nearest row).
+    # Lower band = turn later; lower coverage = stop later at a road end.
+    lookahead_band_top: 0.45
+    lookahead_band_bottom: 0.85
+    lookahead_min_coverage: 0.3
+
+    # Keep following the held estimate for up to road_lost_timeout_s when the
+    # road briefly disappears, at this fraction of speed.
+    follow_while_holding: true
+    holding_speed_scale: 0.6
