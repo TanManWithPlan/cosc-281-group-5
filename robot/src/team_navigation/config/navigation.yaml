@@ -12,8 +12,14 @@
 
     # Look-ahead band within the bottom-third ROI (0 = far edge, 1 = nearest row).
     # Lower band = turn later; lower coverage = stop later at a road end.
+    # The band slides from the slow band (<= 0.30 m/s) to the fast band (>= 0.80 m/s)
+    # so faster driving looks farther ahead and reacts in time.
     lookahead_band_top: 0.45
     lookahead_band_bottom: 0.85
+    lookahead_fast_band_top: 0.15
+    lookahead_fast_band_bottom: 0.55
+    lookahead_slow_speed_m_s: 0.30
+    lookahead_fast_speed_m_s: 0.80
     lookahead_min_coverage: 0.3
 
     # Keep following the held estimate for up to road_lost_timeout_s when the

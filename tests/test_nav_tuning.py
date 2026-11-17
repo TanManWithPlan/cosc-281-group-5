@@ -97,6 +97,21 @@ def test_compressed_frame_is_decoded_on_tick(navigation):
     assert obs.result.found
 
 
+def test_lookahead_band_slides_with_speed(navigation):
+    def band(speed):
+        navigation.cfg['requested_forward_speed_m_s'] = speed
+        return navigation.lookahead_band()
+    assert band(0.10) == band(0.30) == (0.45, 0.85)            # slow band, clamped
+    top, bottom = band(0.55)                                    # halfway
+    assert abs(top - 0.30) < 1e-9 and abs(bottom - 0.70) < 1e-9
+    import pytest
+    assert band(0.80) == pytest.approx((0.15, 0.55))            # fast band
+    assert band(1.4) == pytest.approx((0.15, 0.55))             # clamped above
+    navigation.cfg['requested_forward_speed_m_s'] = 0.80
+    navigation.apply_perception_params()
+    assert (navigation.perception.band_top, navigation.perception.band_bottom) == pytest.approx((0.15, 0.55))
+
+
 def test_invalid_band_rejected(navigation):
     navigation.cfg.update(lookahead_band_top=0.9, lookahead_band_bottom=0.5)
     try:

@@ -54,8 +54,15 @@ PARAMETER_DEFAULTS = {
     'max_yaw_rate_rad_s': 2.4,
     # --- perception look-ahead (fractions of the bottom-third ROI; 0 = far edge, 1 = nearest row) ---
     # Lower band = aim at road closer to the robot = turn later / cut corners less.
-    'lookahead_band_top': 0.45,            # perception.py default 0.25
-    'lookahead_band_bottom': 0.85,         # perception.py default 0.55
+    # Faster driving needs to look farther ahead to react in time, so the band slides
+    # linearly from the slow band (at/below lookahead_slow_speed_m_s) to the fast band
+    # (at/above lookahead_fast_speed_m_s). Set the fast band equal to the slow one to disable.
+    'lookahead_band_top': 0.45,            # slow band; perception.py default 0.25
+    'lookahead_band_bottom': 0.85,         # slow band; perception.py default 0.55
+    'lookahead_fast_band_top': 0.15,
+    'lookahead_fast_band_bottom': 0.55,
+    'lookahead_slow_speed_m_s': 0.30,
+    'lookahead_fast_speed_m_s': 0.80,
     'lookahead_min_coverage': 0.3,         # perception.py default 0.5; lower = keep following a road end longer
     'use_compressed_image': True,          # JPEG topic arrives far fresher than raw over DDS (read at startup)
     # --- planning ---
@@ -172,8 +179,21 @@ class Navigation(Node):
                      'max_jump', 'outlier_accept_count'):
             setattr(self.estimator, name, self.cfg[name])
 
+    def lookahead_band(self):
+        """(top, bottom) band for the current requested speed: slow band at low
+        speed, fast (farther) band at high speed, linear blend in between."""
+        c = self.cfg
+        slow_v, fast_v = c['lookahead_slow_speed_m_s'], c['lookahead_fast_speed_m_s']
+        if not fast_v > slow_v:
+            raise ValueError(f'lookahead_fast_speed_m_s ({fast_v}) must exceed slow ({slow_v})')
+        t = (c['requested_forward_speed_m_s'] - slow_v) / (fast_v - slow_v)
+        t = max(0.0, min(1.0, t))
+        top = c['lookahead_band_top'] + t * (c['lookahead_fast_band_top'] - c['lookahead_band_top'])
+        bottom = c['lookahead_band_bottom'] + t * (c['lookahead_fast_band_bottom'] - c['lookahead_band_bottom'])
+        return top, bottom
+
     def apply_perception_params(self):
-        top, bottom = self.cfg['lookahead_band_top'], self.cfg['lookahead_band_bottom']
+        top, bottom = self.lookahead_band()
         coverage = self.cfg['lookahead_min_coverage']
         if not (0.0 <= top < bottom <= 1.0 and 0.0 < coverage <= 1.0):
             raise ValueError(f'invalid look-ahead band top={top} bottom={bottom} coverage={coverage}')
