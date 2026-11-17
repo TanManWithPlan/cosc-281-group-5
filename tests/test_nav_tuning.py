@@ -91,7 +91,7 @@ def test_compressed_frame_is_decoded_on_tick(navigation):
     msg = types.SimpleNamespace(data=jpeg.tobytes(), header=types.SimpleNamespace(stamp=stamp_now(navigation)))
     navigation.compressed_cb(msg)
     navigation.decode_latest()
-    assert navigation.image is not None and navigation.image.shape == (240, 320, 3)
+    assert navigation.image is not None and navigation.image.shape == (120, 160, 3)   # half-size decode
     assert navigation.jpeg is None
     obs = navigation.process_image(navigation.image)
     assert obs.result.found

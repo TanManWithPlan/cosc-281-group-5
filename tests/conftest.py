@@ -53,6 +53,7 @@ def navigation(monkeypatch):
         'sensor_msgs.msg': {'Image': Message, 'Imu': Message, 'CompressedImage': Message},
         'cv_bridge': {'CvBridge': lambda: types.SimpleNamespace(imgmsg_to_cv2=lambda msg, **kw: msg.data)},
         'course_robot_interfaces.msg': {'MotionRequest': Message},
+        'a2r_robot_interfaces.msg': {'EncoderState': Message},
     }
     for name, values in modules.items():
         mod = types.ModuleType(name)

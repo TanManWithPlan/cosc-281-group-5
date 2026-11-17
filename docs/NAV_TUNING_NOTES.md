@@ -72,3 +72,31 @@ Only one node may publish `navigation/request`; check with
   Charge or swap it before long sessions; the RVR battery also died once.
 - `ros2 bag` could not record `a2r_robot_interfaces` topics (unknown type); use
   `ros2 topic echo --csv` for encoders.
+
+## Route memory merge (Guillermo's `GR-Mapping&Foundation`)
+
+Branch `alejo/nav-route-merge` = `alejo/nav-tuning` + Guillermo's route memory. His
+`route_memory.py` (DeadReckoner, RouteMemory, RouteAdvisor) and its tests are unchanged; the
+tuned navigation node now feeds it (gyro heading, encoder travel, estimator validity) instead of
+his zero-motion node. His node's behaviour that was ported: overwrite protection, >= 3-point
+replay check, hardware-session reset, 1 s periodic save plus final save on shutdown, half-size
+JPEG decode.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `route_mode` | `off` | `record` = save breadcrumbs + road_lost/found events while driving; `replay` = load a route and use its advice (startup only) |
+| `route_file` | `~/.ros/team_navigation/routes/test_route.json` | route JSON (startup only) |
+| `route_advice_weight` | 1.0 | live: speed x (1 - weight x (1 - advice)); 0 = log advice only |
+
+Advice only ever slows the robot (before known curves and where the road was lost when
+recording); steering is still camera-driven. Route errors disable the route features, never driving.
+CSV logs gain `route_factor` and `route_s` (distance travelled) columns.
+
+```bash
+# record a lap, then replay it with advice
+ros2 launch team_navigation team.launch.py namespace:=jetson5   # after editing route_mode in the yaml, or:
+ros2 run team_navigation navigation --ros-args -r __ns:=/jetson5 \
+  --params-file robot/install/team_navigation/share/team_navigation/config/navigation.yaml \
+  -p route_mode:=record -p route_file:=$HOME/routes/lap1.json
+# ... drive the lap, Ctrl+C (final save), then -p route_mode:=replay
+```

@@ -18,4 +18,4 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.npy
-
+.idea/

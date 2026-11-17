@@ -24,6 +24,7 @@ import math
 import os
 from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -34,9 +35,11 @@ from rclpy.executors import ExternalShutdownException
 from sensor_msgs.msg import Image, Imu, CompressedImage
 from cv_bridge import CvBridge
 from course_robot_interfaces.msg import MotionRequest
+from a2r_robot_interfaces.msg import EncoderState
 
 from team_navigation.perception import Perception, load_config
 from team_navigation.estimation import RoadEstimator
+from team_navigation.route_memory import DeadReckoner, RouteMemory, RouteAdvisor, NO_ADVICE
 
 
 # Every tunable number, with defaults. config/navigation.yaml overrides these,
@@ -80,6 +83,19 @@ PARAMETER_DEFAULTS = {
     'road_lost_timeout_s': 0.5,
     'max_jump': 0.3,
     'outlier_accept_count': 3,
+    # --- route memory (Guillermo's route_memory.py); mode/file/resolution read at startup ---
+    'route_mode': 'off',                   # 'off' | 'record' (save a route) | 'replay' (use its advice)
+    'route_file': '~/.ros/team_navigation/routes/test_route.json',
+    'route_overwrite': False,
+    'route_save_interval_s': 1.0,
+    'route_spacing_m': 0.05,
+    'route_cell_m': 0.10,
+    'route_lookahead_m': 0.50,
+    'route_match_window_m': 0.40,
+    'route_max_match_m': 0.30,
+    'route_advice_weight': 1.0,            # live: 0 = log advice only, 1 = apply its speed scale fully
+    'max_imu_age_s': 0.25,
+    'max_encoder_age_s': 0.25,
     # --- logging ---
     'log_period_s': 0.25,
     'csv_logging': True,
@@ -123,6 +139,7 @@ class Navigation(Node):
                                f'(from {cfg_path} if it exists, else defaults)')
         self.estimator = RoadEstimator()
         self.apply_estimator_params()
+        self.setup_route()
 
         self.last_print_s = -math.inf
         self.last_flush_s = -math.inf
@@ -138,6 +155,7 @@ class Navigation(Node):
         self.get_logger().info('Camera topic: ' + ('camera/image_raw/compressed'
                                if self.cfg['use_compressed_image'] else 'camera/image_raw'))
         self.create_subscription(Imu, 'imu/data', self.imu_cb, qos_profile_sensor_data)
+        self.create_subscription(EncoderState, 'encoders', self.encoder_cb, qos_profile_sensor_data)
         self.publisher = self.create_publisher(
             MotionRequest, 'navigation/request',
             QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
@@ -161,7 +179,9 @@ class Navigation(Node):
         msg, self.jpeg = self.jpeg, None
         if msg is None:
             return
-        frame = cv2.imdecode(np.frombuffer(bytes(msg.data), np.uint8), cv2.IMREAD_COLOR)
+        # Half-resolution decode (Guillermo's trick): perception shrinks to 320x240
+        # anyway, and this roughly halves decode time on the Jetson.
+        frame = cv2.imdecode(np.frombuffer(bytes(msg.data), np.uint8), cv2.IMREAD_REDUCED_COLOR_2)
         if frame is None:
             self.get_logger().error('JPEG decode failed; keeping previous frame')
             return
@@ -169,6 +189,139 @@ class Navigation(Node):
 
     def imu_cb(self, msg):
         self.imu = msg
+        # Gyro heading for route dead reckoning (ignored if the stamp is unusable/out of order).
+        try:
+            stamp = self.stamp_to_seconds(msg.header.stamp)
+            if math.isfinite(stamp) and (self.imu_stamp is None or stamp > self.imu_stamp):
+                self.imu_stamp = stamp
+                self.pose.update_gyro(float(msg.angular_velocity.z), stamp)
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+    def encoder_cb(self, msg):
+        """Wheel travel for route dead reckoning (ported from Guillermo's node)."""
+        try:
+            stamp = self.stamp_to_seconds(msg.header.stamp)
+        except (AttributeError, TypeError, ValueError):
+            return
+        if not math.isfinite(stamp):
+            return
+        if self.hardware_session != msg.hardware_session:
+            if self.hardware_session is not None:
+                self.get_logger().warning(
+                    'Hardware session changed; resetting odometry and disabling this route run')
+                self.pose.reset()
+                self.imu_stamp = None
+                if self.route_mode != 'off':
+                    self.route_failed = True
+                if self.route_advisor is not None:
+                    self.route_advisor.reset()
+            self.hardware_session = msg.hardware_session
+        if self.encoder_stamp is not None and stamp <= self.encoder_stamp:
+            return
+        self.encoder, self.encoder_stamp = msg, stamp
+        if not msg.calibrated:
+            return
+        left, right = float(msg.left_delta_m), float(msg.right_delta_m)
+        if math.isfinite(left) and math.isfinite(right):
+            self.pose.update_distance((left + right) / 2.0)
+
+    # ------------------------------------------------------------ route memory
+    @staticmethod
+    def stamp_to_seconds(stamp):
+        return float(stamp.sec) + float(stamp.nanosec) * 1e-9
+
+    def _fresh(self, stamp, max_age):
+        if stamp is None:
+            return False
+        age = self.now_s() - stamp
+        return math.isfinite(age) and 0.0 <= age <= max_age
+
+    def setup_route(self):
+        """Record/replay set-up from Guillermo's route_memory (startup-only parameters)."""
+        c = self.cfg
+        self.route_mode = str(c['route_mode'])
+        if self.route_mode not in ('off', 'record', 'replay'):
+            raise ValueError("route_mode must be 'off', 'record', or 'replay'")
+        positive = ('route_save_interval_s', 'route_spacing_m', 'route_cell_m', 'route_lookahead_m',
+                    'route_match_window_m', 'route_max_match_m', 'max_imu_age_s', 'max_encoder_age_s')
+        if not all(math.isfinite(c[k]) and c[k] > 0 for k in positive):
+            raise ValueError('Route distances, save interval, and sensor age limits must be positive')
+        self.route_path = Path(c['route_file']).expanduser()
+        self.pose = DeadReckoner()
+        self.route_memory = RouteMemory(spacing_m=c['route_spacing_m'], cell_m=c['route_cell_m'])
+        self.route_advisor = None
+        self.route_failed = False
+        self.encoder = self.encoder_stamp = self.imu_stamp = self.hardware_session = None
+        self.last_route_event = self.last_route_save_t = self.last_advice_log = None
+        self.advice = NO_ADVICE
+        if self.route_mode == 'record':
+            if self.route_path.exists() and not c['route_overwrite']:
+                raise FileExistsError(f'Route already exists: {self.route_path}. Choose another '
+                                      'route_file or explicitly set route_overwrite:=true.')
+        elif self.route_mode == 'replay':
+            reference = RouteMemory.load(self.route_path)
+            if len(reference) < 3:
+                raise ValueError('Reference route needs at least three recorded points')
+            self.route_advisor = RouteAdvisor(reference, lookahead_m=c['route_lookahead_m'],
+                                              window_m=c['route_match_window_m'],
+                                              max_match_m=c['route_max_match_m'])
+            self.get_logger().info(f'Loaded reference route: {len(reference)} points')
+        self.get_logger().info(f'Route mode: {self.route_mode} ({self.route_path})')
+
+    def sensors_fresh(self):
+        return (self.encoder is not None and self.encoder.calibrated
+                and self._fresh(self.encoder_stamp, self.cfg['max_encoder_age_s'])
+                and self._fresh(self.imu_stamp, self.cfg['max_imu_age_s']))
+
+    def route_step(self, estimate):
+        """Record breadcrumbs/events and save (record), or refresh advice (replay)."""
+        self.advice = NO_ADVICE
+        if self.route_mode == 'off' or self.route_failed or estimate is None:
+            return
+        now = self.now_s()
+        if self.route_mode == 'record':
+            valid = bool(estimate.valid)
+            if self.last_route_event is not None and valid != self.last_route_event:
+                self.route_memory.mark_event('road_found' if valid else 'road_lost', self.pose, now,
+                                             status=str(estimate.status))
+            self.last_route_event = valid
+            if self.sensors_fresh():
+                r = self.last_observation.result if self.last_observation else None
+                speeds = (float(self.encoder.left_speed_m_s), float(self.encoder.right_speed_m_s))
+                self.route_memory.record(
+                    pose=self.pose, t=now, offset=estimate.offset, valid=estimate.valid,
+                    yellow_px=r.yellow_pixels if r else None,
+                    blue_left=r.blue_left if r else None, blue_right=r.blue_right if r else None,
+                    v=sum(speeds) / 2 if all(math.isfinite(s) for s in speeds) else None,
+                    omega=float(self.imu.angular_velocity.z) if self.imu is not None else None)
+            self.save_route_if_needed()
+        elif self.route_advisor is not None and self.sensors_fresh():
+            self.advice = self.route_advisor.advice(self.pose.x, self.pose.y, self.pose.s)
+            if self.advice.confident and self.advice != self.last_advice_log:
+                self.get_logger().info(
+                    f'Route advice: speed_scale={self.advice.speed_scale:.2f}, '
+                    f'curvature={self.advice.curvature_ahead:.2f}, hazard={self.advice.hazard_ahead}, '
+                    f'match_error={self.advice.match_dist:.2f}m', throttle_duration_sec=1.0)
+            self.last_advice_log = self.advice
+
+    def save_route_if_needed(self, force=False):
+        if self.route_mode != 'record' or self.route_failed or len(self.route_memory) == 0:
+            return
+        now = self.now_s()
+        if (not force and self.last_route_save_t is not None
+                and now - self.last_route_save_t < self.cfg['route_save_interval_s']):
+            return
+        self.route_path.parent.mkdir(parents=True, exist_ok=True)
+        self.route_memory.save(self.route_path)
+        self.last_route_save_t = now
+
+    def route_speed_factor(self):
+        """Blend replay advice into speed: 1 - weight * (1 - advice), 1.0 when not confident."""
+        if not self.advice.confident:
+            return 1.0
+        w = max(0.0, min(1.0, float(self.cfg['route_advice_weight'])))
+        return 1.0 - w * (1.0 - self.advice.speed_scale)
 
     # ------------------------------------------------------------ helpers
     def read_parameters(self):
@@ -269,6 +422,7 @@ class Navigation(Node):
             scale = self.cfg['holding_speed_scale']
         if self.last_observation is not None and self.last_observation.result.blue_warning:
             scale *= self.cfg['blue_slowdown_factor']
+        scale *= self.route_speed_factor()       # replay advice: slow before known curves/hazards
         return Action('follow', estimate.status, estimate.offset, scale)
 
     # ------------------------------------------------------------ hook 4: control (basic)
@@ -314,6 +468,11 @@ class Navigation(Node):
             observation = self.process_image(self.image)
             self.last_observation = observation
             estimate = self.update_estimate(observation, self.imu)
+            try:
+                self.route_step(estimate)
+            except Exception as exc:          # route features must never stop driving
+                self.route_failed, self.advice = True, NO_ADVICE
+                self.get_logger().error(f'Route memory disabled after error: {exc}')
             action = self.choose_action(estimate)
             forward, yaw = self.compute_motion(action)
             if not all(math.isfinite(v) for v in (forward, yaw)):
@@ -335,7 +494,7 @@ class Navigation(Node):
     # ------------------------------------------------------------ logging
     COLUMNS = ['ros_time_s', 'image_age_s', 'found', 'raw_error', 'yellow_pixels',
                'blue_left', 'blue_right', 'estimate', 'valid', 'est_status',
-               'action', 'forward_m_s', 'yaw_rad_s', 'error']
+               'action', 'forward_m_s', 'yaw_rad_s', 'error', 'route_factor', 'route_s']
 
     def open_log(self):
         """One CSV per launch in ~/nav_runs/run_<date>_<time>/ (outside the repo)."""
@@ -366,7 +525,8 @@ class Navigation(Node):
                    f'{r.blue_left:.3f}' if r else '', f'{r.blue_right:.3f}' if r else '',
                    f'{est:+.4f}', int(bool(estimate and estimate.valid)),
                    estimate.status if estimate else '',
-                   action.mode if action else 'stop', f'{forward:.4f}', f'{yaw:+.4f}', error_text]
+                   action.mode if action else 'stop', f'{forward:.4f}', f'{yaw:+.4f}', error_text,
+                   f'{self.route_speed_factor():.3f}', f'{self.pose.s:.3f}']
             if self.csv_writer is not None:
                 self.csv_writer.writerow(row)
                 if now_s - self.last_flush_s >= 1.0:
@@ -392,13 +552,19 @@ class Navigation(Node):
 
 def main():
     rclpy.init()
-    node = Navigation()
+    node = None
     try:
+        node = Navigation()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.close_log()
-        node.destroy_node()
+        if node is not None:
+            try:
+                node.save_route_if_needed(force=True)
+            except Exception as exc:
+                node.get_logger().error(f'Could not save route during shutdown: {exc}')
+            node.close_log()
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
