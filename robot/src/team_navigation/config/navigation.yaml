@@ -1,4 +1,23 @@
 /**:
   ros__parameters:
-    # A suggested development setting, not permission to move the car.
+    # Retained for future controller work. The current node always commands zero.
     requested_forward_speed_m_s: 0.05
+
+    # off: no route I/O; record: save a new route; replay: load a saved route.
+    route_mode: "off"
+    route_file: "~/.ros/team_navigation/routes/test_route.json"
+    route_overwrite: false
+    route_save_interval_s: 1.0
+
+    # Recording resolution
+    route_spacing_m: 0.05
+    route_cell_m: 0.10
+
+    # Replay matching and lookahead
+    route_lookahead_m: 0.50
+    route_match_window_m: 0.40
+    route_max_match_m: 0.30
+
+    # Sensor freshness gates for recording and replay advice
+    max_imu_age_s: 0.25
+    max_encoder_age_s: 0.25
