@@ -18,3 +18,5 @@ Thumbs.db
 *.tar.gz
 *.npy
 
+
+simulation-results/

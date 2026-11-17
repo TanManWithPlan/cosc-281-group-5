@@ -3,14 +3,14 @@
 The control branch integrates `perception.py` from `origin/pixel-clustering`
 (ab550a9) and `estimation.py` from `origin/estimation` (87a4853), unchanged.
 The new controller and navigation adapter connect these existing team modules.
-This does not include the perception branch's separate web debugging node.
+The integration/digital-tests branch additionally merges the web debugging node and drive-basic logging/fork selection.
 
 Pipeline: BGR camera frame -> yellow/blue perception -> smoothed road offset ->
 proportional controller -> `navigation/request` at 20 Hz. IMU is received but
 not used. Offset is normalized image position, not metres or heading.
 
 Positive offset means road right; positive ROS yaw means left, so
-`yaw = clamp(-steering_kp * offset, +/- max_yaw_rate_rad_s)`.
+`yaw = clamp(-steering_gain_rad_s * offset, +/- max_yaw_rate_rad_s)`.
 Forward speed is `requested_forward_speed_m_s * (1 - turn_slowdown * abs(offset))`.
 Defaults are an initial tuning proposal, not physically validated gains.
 
@@ -22,7 +22,7 @@ when fresh usable detections resume; the course base independently handles RB
 arming, request expiry, and motor permission. No baseline safety code is changed.
 
 Tune ROS parameters in `robot/src/team_navigation/config/navigation.yaml`.
-HSV ranges must match the actual lighting and tape. Blue warning stops on either
+HSV ranges are loaded from hsv_config_path, the JSON saved by the camera tuner, and must match the actual lighting and tape. Blue warning stops on either
 side, so verify that normal boundary visibility does not cause constant stopping.
 Do not infer physical distance from the image offset.
 

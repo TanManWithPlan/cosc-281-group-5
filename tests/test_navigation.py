@@ -56,3 +56,34 @@ def test_fork_choice(navigation, choice, sign):
         stamp=types.SimpleNamespace(sec=1,nanosec=0))))
     navigation.tick()
     assert navigation.messages[-1].yaw_rate_rad_s * sign > 0
+
+
+def test_csv_logging(navigation, tmp_path):
+    import csv
+    navigation.cfg['csv_logging'] = True
+    navigation.cfg['log_dir'] = str(tmp_path)
+    navigation.open_log()
+    deliver(navigation)
+    navigation.close_log()
+    files = list(tmp_path.glob('run_*/nav_log.csv'))
+    assert len(files) == 1
+    with files[0].open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert float(rows[0]['forward_m_s']) > 0
+    assert float(rows[0]['yaw_rad_s']) < 0
+
+
+def test_repeated_frame_is_cached(navigation):
+    deliver(navigation)
+    observation = navigation.last_observation
+    navigation.tick()
+    assert navigation.last_observation is observation
+    assert navigation.current_estimate.status == 'repeat_frame'
+
+
+def test_clock_rollback_stops(navigation):
+    deliver(navigation)
+    navigation.now_ns = 500_000_000
+    navigation.tick()
+    assert navigation.messages[-1].forward_speed_m_s == 0
