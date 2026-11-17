@@ -46,12 +46,16 @@ and existing perception tests behave as before.
 
 ## How to run
 
-On the Jetson (SSH), once per checkout: build with the course Python environment.
+On the Jetson (SSH), once: put the branch in its **own folder** (leaves `~/a2r-student` and any
+uncommitted work there untouched) and build it with the course Python environment.
 
 ```bash
-cd ~/a2r-student && git fetch && git checkout alejo/nav-route-merge
-source /opt/ros/jazzy/setup.bash && source ~/ros-venv/bin/activate
+git -C ~/a2r-student fetch origin
+git -C ~/a2r-student worktree add ~/a2r-nav origin/alejo/nav-route-merge
+cd ~/a2r-nav && source /opt/ros/jazzy/setup.bash && source ~/ros-venv/bin/activate
 cd robot && python -m colcon build --symlink-install     # expect: 4 packages finished
+cd ~/a2r-nav                                             # run the commands below from here
+# later updates: cd ~/a2r-nav && git fetch origin && git checkout origin/alejo/nav-route-merge, rebuild
 ```
 
 Then, from the repository root, one command starts the base (motors enabled, track width from
