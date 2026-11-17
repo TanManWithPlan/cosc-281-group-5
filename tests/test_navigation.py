@@ -1,12 +1,16 @@
 import pytest
 
+@pytest.fixture(params=glob.glob("data/*.jpg"))
+def image(request):
+   return request.param
+
 @pytest.fixture
-def observation(navigation):
-    # return navigation.process_image(...)
+def observation(navigation, image):
+    return navigation.process_image(image)
 
 @pytest.fixture
 def estimate(navigation, observation):
-    # return navigation.update_estimate(observation, imu=...)
+    return navigation.update_estimate(observation, imu=navigation.imu)
 
 @pytest.fixture
 def action(navigation, estimate):
