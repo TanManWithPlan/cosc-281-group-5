@@ -77,6 +77,9 @@ class Navigation(Node):
                 now_s < self.estimator.last_used_stamp_s):
             self.estimator.reset()
             return None
+        if (stamp_s is not None and self.estimator.last_used_stamp_s is not None
+                and stamp_s < self.estimator.last_used_stamp_s):
+            return None
         return self.estimator.update(
             observation.error if observation is not None else None,
             observation.found if observation is not None else False,

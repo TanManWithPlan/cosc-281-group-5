@@ -395,3 +395,16 @@ def test_navigation_pipeline_steers_and_stops_on_missing_or_future_image(navigat
     assert command.forward_speed_m_s == command.yaw_rate_rad_s == 0
     command = deliver(frame, sec=10)
     assert command.forward_speed_m_s == command.yaw_rate_rad_s == 0
+
+
+def test_navigation_rejects_older_frame(navigation):
+    import numpy as np
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    frame[160:, 240:252] = (0, 255, 255)
+    for nanosec in (900_000_000, 800_000_000):
+        navigation.image_cb(types.SimpleNamespace(data=frame, header=types.SimpleNamespace(
+            stamp=types.SimpleNamespace(sec=0, nanosec=nanosec))))
+        navigation.tick()
+    assert navigation.messages[-2].forward_speed_m_s > 0
+    assert navigation.messages[-1].forward_speed_m_s == 0
+    assert navigation.messages[-1].yaw_rate_rad_s == 0
