@@ -186,8 +186,6 @@ class TrackTest(Node):
         with self.lock:
             r = self.perception.process(frame)
 
-        print(frame)
-
         # What a P-controller would send to the treads (preview only; this
         # node publishes no motion request).
         left_cmd = float(np.clip(self.base_speed + self.k_p * r.error, -1, 1))
