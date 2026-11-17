@@ -1,4 +1,5 @@
 import pytest
+import glob
 
 @pytest.fixture(params=glob.glob("data/*.jpg"))
 def image(request):
@@ -36,7 +37,7 @@ def test_process_image(navigation):
 def test_update_estimate(estimate):
     assert estimate is not None
 
-def test_choose_action(action);
+def test_choose_action(action):
     assert action is not None
 
 def test_compute_motion(motion):
