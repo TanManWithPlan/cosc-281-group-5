@@ -2,6 +2,7 @@ import pytest
 import types
 import importlib
 import sys
+import time
 
 # Borrowed - we need modules too!
 from pathlib import Path
@@ -20,8 +21,12 @@ def navigation(monkeypatch):
         def __init__(self, name):
             self.subscriptions = {}
             self.messages = []
+            self._params = {}
         def declare_parameter(self, name, value):
+            self._params[name] = value
             return types.SimpleNamespace(value=value)
+        def get_parameter(self, name):
+          return types.SimpleNamespace(value=self._params[name])
         def create_subscription(self, kind, topic, callback, qos):
             self.subscriptions[topic] = callback
         def create_publisher(self, *args):
@@ -29,9 +34,15 @@ def navigation(monkeypatch):
         def create_timer(self, period, callback):
             assert period == .05
         def get_clock(self):
-            return types.SimpleNamespace(now=lambda: types.SimpleNamespace(to_msg=lambda: 'stamp'))
+            return types.SimpleNamespace(
+                    now=lambda: types.SimpleNamespace(
+                        nanoseconds=int(time.time() * 1e9),
+                        to_msg=lambda: 'stamp'
+                        )
+            )
         def get_logger(self):
-            return types.SimpleNamespace(error=lambda text: None)
+            nop = lambda *a, **kw: None
+            return types.SimpleNamespace(error=nop, info=nop, warning=nop, fatal=nop)
 
     modules = {
         'rclpy': {}, 'rclpy.node': {'Node': Node},
