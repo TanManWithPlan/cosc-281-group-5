@@ -18,4 +18,5 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.npy
-
+.312/
+**/*.egg-info/

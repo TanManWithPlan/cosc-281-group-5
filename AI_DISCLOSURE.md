@@ -13,4 +13,8 @@ Test data, where physical resources were not available:
 - `tests/data/path_t_intersection.jpg`
 - `tests/data/path_wide_open.jpg`
 
+### Tests based on the original file `test_navigation.py`
+- `test_navigation_images.py`
+- `test_navigation_unclear.py`
+
 - 

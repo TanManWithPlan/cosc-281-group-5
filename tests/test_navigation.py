@@ -28,28 +28,24 @@ def action(navigation, estimate):
 def motion(navigation, action):
    return navigation.compute_motion(action)
 
-# Basic one written by claude
 def test_process_image_returns_none_on_missing_image(navigation):
     assert navigation.process_image(None) is None
 
-# Other tests that we need:
-# - Test for quality of image processing
-# - Not necessarily for this file: robot reaction, etc
-# - Edge cases
-# - Stale image
-
-#TODO: update these for expected values
 def test_process_image(observation):
-    print(observation)
+    # Test that given an image, an observation is found with a ~somewhat low error
     assert observation is not None
+    assert observation.result.found is True
+    assert abs(observation.result.error) < 0.5
 
 def test_update_estimate(estimate):
-    print(estimate)
+    # Test that the code is capable of creating valid estimates
     assert estimate is not None
+    assert estimate.valid is True
 
 def test_choose_action(action):
-    print(action)
+    # Test that an action exists, and is not "stop" (test cases shouldn't cause stoppages yet)
     assert action is not None
+    assert action.mode != 'stop'
 
 def test_ignore_stale_action(navigation, image):
     raw_image = cv2.imread(str(image))
@@ -62,6 +58,7 @@ def test_ignore_stale_action(navigation, image):
     assert act.reason == 'stale_image'
 
 def test_compute_motion(motion):
-    print(motion)
     assert motion is not None
+    # Not an empty tuple either
+    assert motion[0] != 0 and motion[1] != 0
 
